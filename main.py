@@ -20,32 +20,29 @@ from apex import amp
 import matplotlib.pyplot as plt
 import numpy as np
 
-from utils.utils import get_loaders, normalize
+from utils.utils import get_loaders
 
-parser = argparse.ArgumentParser( description='Adversarial training')
+parser = argparse.ArgumentParser( description='Normal training')
 parser.add_argument('--resume', '-r',       action='store_true',              help='resume from checkpoint')
-parser.add_argument('--prefix',             default='Small training',    type=str,   help='prefix used to define logs')
+parser.add_argument('--prefix',             default='test',    type=str,   help='prefix used to define logs')
 parser.add_argument('--seed',               default=59572406,     type=int,   help='random seed')
 
 parser.add_argument('--batch-size', '-b',   default=232,          type=int,   help='mini-batch size (default: 120)')
-parser.add_argument('--epochs',             default=100,           type=int,   help='number of total epochs to run')
+parser.add_argument('--epochs',             default=40,           type=int,   help='number of total epochs to run')
 
-parser.add_argument('--lr-min', default=0.0001, type=float, help='minimum learning rate for optimizer')
-parser.add_argument('--lr-max', default=0.001, type=float, help='maximum learning rate for optimizer')
+# parser.add_argument('--lr-min', default=5e-3, type=float, help='minimum learning rate for optimizer')
+parser.add_argument('--lr-max', default=1.0, type=float, help='maximum learning rate for optimizer')
 parser.add_argument('--momentum', '--mm', default=0.9, type=float, help='momentum for optimizer')
 parser.add_argument('--weight-decay', '--wd', default=0.0001, type=float, help='weight decay for model training')
 
-parser.add_argument('--target', '-t',       default=None,         type=int,   help='adversarial attack target label')
-parser.add_argument('--rnd-target', '--rt', action='store_true',              help='non-target attack using random label as target')
-parser.add_argument('--iteration', '-i',    default=20,           type=int,   help='adversarial attack iterations (default: 20)')
-parser.add_argument('--step-size', '--ss',  default=0.005,        type=float, help='step size for adversarial attacks')
-parser.add_argument('--epsilon',            default=1,            type=float, help='epsilon for adversarial attacks')
-parser.add_argument('--kernel-size', '-k',  default=13,           type=int,   help='kernel size for adversarial attacks, must be odd integer')
+# parser.add_argument('--target', '-t',       default=None,         type=int,   help='adversarial attack target label')
+# parser.add_argument('--rnd-target', '--rt', action='store_true',              help='non-target attack using random label as target')
+parser.add_argument('--iteration', '-i',    default=0,           type=int,   help='adversarial attack iterations (default: 20)')
+# parser.add_argument('--step-size', '--ss',  default=0.005,        type=float, help='step size for adversarial attacks')
+# parser.add_argument('--epsilon',            default=1,            type=float, help='epsilon for adversarial attacks')
+# parser.add_argument('--kernel-size', '-k',  default=13,           type=int,   help='kernel size for adversarial attacks, must be odd integer')
 
-parser.add_argument('--image-size', '--is', default=256,          type=int,   help='resize input image (default: 256 for ImageNet)')
-parser.add_argument('--image-crop', '--ic', default=224,          type=int,   help='centercrop input image after resize (default: 224 for ImageNet)')
 parser.add_argument('--data-directory',     default='../Restricted_ImageNet',type=str,   help='dataset inputs root directory')
-# parser.add_argument('--data-classname',     default='../ImageNet/LOC_synset_mapping.txt',type=str, help='dataset classname file')
 parser.add_argument('--opt-level', '-o',    default='O1',         type=str,   help='Nvidia apex optimation level (default: O1)')
 args = parser.parse_args()
 
@@ -60,9 +57,9 @@ def main():
     # Load model and optimizer
     model = models.resnet34(pretrained=False, num_classes=10).to(device)
     # Add weight decay into the model
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr_max,
+    optimizer = torch.optim.Adadelta(model.parameters(), lr=args.lr_max,
                                 # momentum=args.momentum,
-                                # weight_decay=args.weight_decay
+                                weight_decay=args.weight_decay
                                 )
 
     if args.resume:
@@ -84,7 +81,8 @@ def main():
         model, optimizer = amp.initialize(model, optimizer, opt_level=args.opt_level)
     criterion = nn.CrossEntropyLoss().to(device)
     # cyclic learning rate
-    # scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=args.lr_min, max_lr=args.lr_max)
+    # scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, \
+    #     base_lr=args.lr_min, max_lr=args.lr_max, step_size_up=2*len(train_loader))
 
     # Logger
     result_folder = './logs/'
@@ -113,7 +111,7 @@ def main():
 
             # use adversarial examples to train the model
             optimizer.zero_grad()
-            distort_image = (normalize(data, args.batch_size))
+            distort_image = (data)
             distort_logit = model(distort_image)
             loss = criterion(distort_logit, target)
             with amp.scale_loss(loss, optimizer) as scaled_loss:
@@ -126,9 +124,9 @@ def main():
             total += target.size(0)
             correct += (preds_top_class.view(target.shape) == target).sum().item()
             # scheduler
-            unskipped_counter = amp._amp_state.loss_scalers[0]._unskipped
+            # unskipped_counter = amp._amp_state.loss_scalers[0]._unskipped
             # if unskipped_counter%(args.iteration+1) != 0 or unskipped_counter == 0:
-                # amp._amp_state.loss_scalers[0]._unskipped = 0
+            #     amp._amp_state.loss_scalers[0]._unskipped = 0
             # else:
             #     scheduler.step()
             
@@ -145,7 +143,7 @@ def main():
                 data, target = data.to(device), target.to(device)
     
                 optimizer.zero_grad()
-                output_logit = model(normalize(data, args.batch_size))
+                output_logit = model(data)
                 loss = F.cross_entropy(output_logit, target)
                 preds = F.softmax(output_logit, dim=1)
                 preds_top_p, preds_top_class = preds.topk(1, dim=1)
